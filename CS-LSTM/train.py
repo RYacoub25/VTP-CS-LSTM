@@ -30,7 +30,8 @@ def train(
     batch_size:     int = 64,
     hidden_dim:     int = 128,
     lr:             float = 1e-3,
-    epochs:         int = 20
+    epochs:         int = 5,
+    use_delta_yaw: bool = False,
 ):
     # 1) Build dataset
     ds = ArgoverseNeighborDataset(
@@ -40,12 +41,16 @@ def train(
         seq_len         = seq_len,
         pred_len        = pred_len,
         max_neighbors   = max_neighbors,
+        use_delta_yaw   = use_delta_yaw,
     )
 
     # 2) Setup device & de-normalization stats
     device    = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     mu_xy     = torch.tensor(ds.feat_mean[0, :2], device=device)   # [2]
     sigma_xy  = torch.tensor(ds.feat_std[0,  :2], device=device)   # [2]
+    
+    print("Using device:", device)
+    print("CUDA available:", torch.cuda.is_available())
 
     # 3) Print some frame intervals
     dts_ns = [ds.timestamps[i+1] - ds.timestamps[i] for i in range(5)]
@@ -57,43 +62,44 @@ def train(
     n_trn = len(ds) - n_val
     tr_ds, val_ds = random_split(ds, [n_trn, n_val])
 
-    # 5) Find & visualize the “crowded” sample
-    neighbor_counts = [int(mask_o[-1].sum()) for _,_,_,mask_o,_,_ in ds]
-    best_idx = int(np.argmax(neighbor_counts))
-    print(f"Most crowded sample index: {best_idx} ({neighbor_counts[best_idx]} neighbors)")
+    # # 5) Find & visualize the “crowded” sample
+    # neighbor_counts = [int(mask_o[-1].sum()) for _,_,_,mask_o,_,_ in ds]
+    # best_idx = int(np.argmax(neighbor_counts))
+    # print(f"Most crowded sample index: {best_idx} ({neighbor_counts[best_idx]} neighbors)")
 
-    hist_e, hist_t, hist_o, mask_o, ctx, fut = ds[best_idx]
-    # de-normalize neighbor coords (meters)
-    coords_norm = hist_o[-1][mask_o[-1].astype(bool), :2]
-    coords_m    = coords_norm * sigma_xy.cpu().numpy() + mu_xy.cpu().numpy()
+    # hist_e, hist_t, hist_o, mask_o, ctx, fut = ds[best_idx]
+    # # de-normalize neighbor coords (meters)
+    # coords_norm = hist_o[-1][mask_o[-1].astype(bool), :2]
+    # coords_m    = coords_norm * sigma_xy.cpu().numpy() + mu_xy.cpu().numpy()
 
-    # jitter & plot
-    jitter = np.random.normal(scale=0.2, size=coords_m.shape)
-    coords_j = coords_m + jitter
+    # # jitter & plot
+    # jitter = np.random.normal(scale=0.2, size=coords_m.shape)
+    # coords_j = coords_m + jitter
 
-    plt.figure()
-    plt.scatter(coords_j[:,0], coords_j[:,1], alpha=0.7, label="neighbors (m)")
-    plt.scatter(0, 0, c="red", s=100, label="ego")
-    plt.title(f"Jittered Neighbors for sample {best_idx}")
-    plt.xlabel("Δx (m)"); plt.ylabel("Δy (m)")
-    plt.legend(); plt.axis("equal"); plt.show()
+    # plt.figure()
+    # plt.scatter(coords_j[:,0], coords_j[:,1], alpha=0.7, label="neighbors (m)")
+    # plt.scatter(0, 0, c="red", s=100, label="ego")
+    # plt.title(f"Jittered Neighbors for sample {best_idx}")
+    # plt.xlabel("Δx (m)"); plt.ylabel("Δy (m)")
+    # plt.legend(); plt.axis("equal"); plt.show()
 
-    # de-normalize history & future and plot
-    hist_xy_m = hist_t[:, :2] * sigma_xy.cpu().numpy() + mu_xy.cpu().numpy()
-    fut_m     = fut * sigma_xy.cpu().numpy() + mu_xy.cpu().numpy()
+    # # de-normalize history & future and plot
+    # hist_xy_m = hist_t[:, :2] * sigma_xy.cpu().numpy() + mu_xy.cpu().numpy()
+    # fut_m     = fut * sigma_xy.cpu().numpy() + mu_xy.cpu().numpy()
 
-    plt.figure()
-    plt.plot(hist_xy_m[:,0], hist_xy_m[:,1], "-o", label="history (m)")
-    plt.scatter(fut_m[0], fut_m[1], c="red", label="true future (m)")
-    plt.title(f"Relative Trajectory for sample {best_idx}")
-    plt.xlabel("Δx (m)"); plt.ylabel("Δy (m)")
-    plt.axis("equal"); plt.legend(); plt.show()
+    # plt.figure()
+    # plt.plot(hist_xy_m[:,0], hist_xy_m[:,1], "-o", label="history (m)")
+    # plt.scatter(fut_m[0], fut_m[1], c="red", label="true future (m)")
+    # plt.title(f"Relative Trajectory for sample {best_idx}")
+    # plt.xlabel("Δx (m)"); plt.ylabel("Δy (m)")
+    # plt.axis("equal"); plt.legend(); plt.show()
 
     # 6) Build DataLoaders
     train_loader = DataLoader(tr_ds, batch_size=batch_size, shuffle=True,
-                              num_workers=0, pin_memory=True)
+                              num_workers=2, persistent_workers=True, pin_memory=True)
     val_loader   = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
-                              num_workers=0, pin_memory=True)
+                              num_workers=2, persistent_workers=True, pin_memory=True)
+
 
     # 7) Build model, optimizer, loss
     model   = ContextualSocialLSTM(
@@ -163,7 +169,7 @@ def train(
     # 9) Save final model
     torch.save(model.state_dict(), "contextual_social_lstm_argo.pth")
     print("✅ Model saved to contextual_social_lstm_argo.pth")
-
+    return val_ade_m
 
 if __name__ == "__main__":
     import argparse
@@ -178,9 +184,11 @@ if __name__ == "__main__":
     p.add_argument("--hidden",   type=int,   default=128)
     p.add_argument("--lr",       type=float, default=1e-3)
     p.add_argument("--epochs",   type=int,   default=20)
-    args = p.parse_args()
+    p.add_argument("--use_delta_yaw", action="store_true",help="Include delta_yaw as an extra feature channel")
+    args=p.parse_args()
 
-    train(
+    #Run ablation: without Δ-yaw, then with Δ-yaw
+    ade_yes = train(
         ego_csv        = args.ego,
         social_csv     = args.social,
         contextual_npy = args.context,
@@ -190,5 +198,32 @@ if __name__ == "__main__":
         batch_size     = args.batch,
         hidden_dim     = args.hidden,
         lr             = args.lr,
-        epochs         = args.epochs
+        epochs         = args.epochs,
+        use_delta_yaw  = True
     )
+    ade_no = train(
+        ego_csv        = args.ego,
+        social_csv     = args.social,
+        contextual_npy = args.context,
+        seq_len        = args.seq_len,
+        pred_len       = args.pred_len,
+        max_neighbors  = args.max_nb,
+        batch_size     = args.batch,
+        hidden_dim     = args.hidden,
+        lr             = args.lr,
+        epochs         = args.epochs,
+        use_delta_yaw  = False
+    )
+
+    # Plot the comparison bar chart
+    import matplotlib.pyplot as plt
+    plt.figure()
+    plt.bar(
+        ['+ Δ-yaw', 'no Δ-yaw'],
+        [ade_yes, ade_no],
+        color=['skyblue', 'orange'],
+        width=0.4
+    )
+    plt.ylabel('Best Val ADE (m)')
+    plt.title('Effect of Δ-yaw on Single-Step ADE')
+    plt.show()

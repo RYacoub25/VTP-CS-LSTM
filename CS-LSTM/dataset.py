@@ -11,21 +11,44 @@ class ArgoverseNeighborDataset(Dataset):
                  seq_len: int = 30,
                  pred_len: int = 1,
                  max_neighbors: int = 10,
+                 use_delta_yaw: bool = False,
                  features=None):
         if features is None:
             features = ['x','y','z','vx','vy','vz','ax','ay','az']
+            if use_delta_yaw:
+                features.append('delta_yaw')
         self.seq_len       = seq_len
         self.pred_len      = pred_len
         self.max_neighbors = max_neighbors
+        self.use_delta_yaw = use_delta_yaw
         self.features      = features
 
         # for diagnostics
         self._neighbor_counts = []
 
-        # 1) load files
-        self.ego_df    = pd.read_csv(ego_path)
+        # 1) load ego CSV
+        self.ego_df = pd.read_csv(ego_path)
+        # — ego has yaw but no delta_yaw: compute it if requested
+        if use_delta_yaw:
+            self.ego_df = self.ego_df.sort_values('timestamp_ns')
+            self.ego_df['delta_yaw'] = self.ego_df['yaw'].diff().fillna(0.0)
+
+        # 2) load social CSV
         self.social_df = pd.read_csv(social_path)
+        # — social already has delta_yaw in your file; only compute if missing
+        if use_delta_yaw and 'delta_yaw' not in self.social_df.columns:
+            self.social_df = self.social_df.sort_values(['track_uuid','timestamp_ns'])
+            self.social_df['delta_yaw'] = (
+                self.social_df
+                    .groupby('track_uuid')['yaw']
+                    .diff()
+                    .fillna(0.0)
+            )
+
         self.context   = np.load(contextual_path)
+
+
+
 
         # 2) group by timestamp
         self.ego_group    = self.ego_df.groupby('timestamp_ns')
@@ -36,6 +59,8 @@ class ArgoverseNeighborDataset(Dataset):
         social_times = set(self.social_group.groups.keys())
         self.timestamps = sorted(ego_times & social_times)
 
+
+        
         # 4) cache per-timestamp arrays
         self.social_data = {}
         for ts, df_ts in self.social_group:
