@@ -13,6 +13,7 @@ class ArgoverseNeighborDataset(Dataset):
                  pred_len: int = 1,
                  max_neighbors: int = 10,
                  use_delta_yaw: bool = False,
+                 use_context: bool = True,
                  features=None):
         if features is None:
             features = ['x','y','z','vx','vy','vz','ax','ay','az']

@@ -27,7 +27,8 @@ def train(
     hidden_dim: int,
     lr: float,
     epochs: int,
-    use_delta_yaw: bool
+    use_delta_yaw: bool,
+    use_context: bool
 ):
     # 1) Dataset
     ds = ArgoverseNeighborDataset(
@@ -37,7 +38,8 @@ def train(
         seq_len         = seq_len,
         pred_len        = pred_len,
         max_neighbors   = max_neighbors,
-        use_delta_yaw   = use_delta_yaw,
+        use_delta_yaw   = True,
+        use_context     = True,
     )
 
     # 2) Device & de-normal stats
@@ -94,6 +96,9 @@ def train(
             hist_o = hist_o.to(device, non_blocking=True)
             mask_o = mask_o.to(device, non_blocking=True)
             ctx    = ctx.to(device,    non_blocking=True)
+            if not use_context:
+                # disable all contextual features
+                ctx = torch.zeros_like(ctx)
             fut    = fut.to(device,    non_blocking=True)
 
             opt.zero_grad()
@@ -153,7 +158,8 @@ def main():
     p.add_argument("--lr",       type=float, default=1e-3)
     p.add_argument("--epochs",   type=int,   default=20)
     p.add_argument("--use_delta_yaw", action="store_true",
-                   help="Include delta_yaw as an extra feature channel")
+                   help="Include delta_yaw as an extra feature channel"),
+    p.add_argument("--no_context",   action="store_true", help="disable contextual features")
     args = p.parse_args()
 
     # Pull all args into a dict, but pop off `use_delta_yaw`
@@ -168,19 +174,21 @@ def main():
         "hidden_dim":     args.hidden,
         "lr":             args.lr,
         "epochs":         args.epochs,
+        "use_delta_yaw":  True,
+        "use_context":    True
     }
 
     # Run +Δ-yaw then –Δ-yaw
-    best_with    = train(**params, use_delta_yaw=True)
-    best_without = train(**params, use_delta_yaw=False)
+    best_without    = train(**params, use_context=False)
+    best_with = train(**params, use_context=True)
 
-    # 8) Bar chart
+#    8) Bar chart
     plt.figure()
-    plt.bar(['+ Δ-yaw', 'no Δ-yaw'],
+    plt.bar(['+ context', 'no context'],
             [best_with, best_without],
             width=0.5)
     plt.ylabel('Best Val ADE (m)')
-    plt.title('Δ-yaw Ablation')
+    plt.title('Context Ablation')
     plt.show()
 
 if __name__ == "__main__":
