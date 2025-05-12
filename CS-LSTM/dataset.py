@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
@@ -83,7 +84,15 @@ class ArgoverseNeighborDataset(Dataset):
 
         # 6) build samples
         self.samples = self._prepare_samples()
-
+        for i, sample in enumerate(self.samples):
+            self.samples[i] = {
+                'hist_ego':    torch.from_numpy(sample['hist_ego']),
+                'hist_target': torch.from_numpy(sample['hist_target']),
+                'hist_others': torch.from_numpy(sample['hist_others']),
+                'mask_others': torch.from_numpy(sample['mask_others']),
+                'context':     torch.from_numpy(sample['context']),
+                'future_pos':  torch.from_numpy(sample['future_pos']),
+            }
         # 7) print neighbor-count stats if we collected any
         if self._neighbor_counts:
             print("Neighbor count stats:",
