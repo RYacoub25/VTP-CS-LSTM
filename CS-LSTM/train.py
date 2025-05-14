@@ -77,6 +77,7 @@ def train(
     seq_len: int,
     pred_len: int,
     max_neighbors: int,
+    neighbor_radius: float,
     batch_size: int,
     hidden_dim: int,
     lr: float,
@@ -85,6 +86,7 @@ def train(
     use_context: bool,
     use_intention: bool
 ):
+
     # 1) Dataset
     ds = ArgoverseNeighborDataset(
         ego_path        = ego_csv,
@@ -95,7 +97,8 @@ def train(
         max_neighbors   = max_neighbors,
         use_delta_yaw   = use_delta_yaw,
         use_context     = use_context,
-        use_intention   = use_intention
+        use_intention   = use_intention,
+        neighbor_radius = neighbor_radius
     )
 
     # 2) Device & de-normal stats
@@ -231,6 +234,7 @@ def main():
     p.add_argument("--seq_len",  type=int,   default=30)
     p.add_argument("--pred_len", type=int,   default=1)
     p.add_argument("--max_neighbors", type=int, default=10)
+    p.add_argument("--neighbor_radius", type=float, default=5.0)
     p.add_argument("--batch",    type=int,   default=64)
     p.add_argument("--hidden",   type=int,   default=128)
     p.add_argument("--lr",       type=float, default=1e-3)
@@ -250,16 +254,25 @@ def main():
         "seq_len":        args.seq_len,
         "pred_len":       args.pred_len,
         "max_neighbors":  args.max_neighbors,
+        "neighbor_radius": args.neighbor_radius,
         "batch_size":     args.batch,
         "hidden_dim":     args.hidden,
         "lr":             args.lr,
         "epochs":         args.epochs,
         "use_delta_yaw":  args.use_delta_yaw,
         "use_context":    not args.no_context,
-        "use_intention":  not args.use_intention
+        "use_intention":  args.use_intention
     }
-    print(train(**params))
+    best = {}
+    for r in [3.0, 5.0, 7.5, 10.0]:
+        print(f"\n=== Running with neighbor_radius = {r} m ===")
+        params["neighbor_radius"] = r
+        ade = train(**params)
+        print(f"→ radius {r:.1f} m gives ADE = {ade:.4f} m")
+        best[r] = ade
 
+    best_radius = min(best, key=best.get)
+    print(f"\n🎯 Best radius: {best_radius:.1f} m (ADE = {best[best_radius]:.4f} m)")
 
 if __name__ == "__main__":
     main()

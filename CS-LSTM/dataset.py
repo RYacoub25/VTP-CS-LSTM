@@ -13,6 +13,7 @@ class ArgoverseNeighborDataset(Dataset):
                  pred_len: int = 1,
                  max_neighbors: int = 10,
                  use_delta_yaw: bool = False,
+                 neighbor_radius: float = None,
                  use_context: bool = True,
                  use_intention: bool = False,
                  features=None):
@@ -27,6 +28,7 @@ class ArgoverseNeighborDataset(Dataset):
         self.use_delta_yaw = use_delta_yaw
         self.use_context   = use_context
         self.use_intention = use_intention
+        self.neighbor_radius = neighbor_radius
 
         # 1) build feature list
         if features is None:
@@ -152,10 +154,24 @@ class ArgoverseNeighborDataset(Dataset):
                 hist_others = []; mask_others = []
                 for t in hist_times:
                     ids_t, feats_t, _ = self.social_data[t]
-                    dists = np.linalg.norm(feats_t[:, :2], axis=1)
-                    pick  = np.argsort(dists)[:self.max_neighbors]
+                    # dists_all = np.linalg.norm(feats_t[:, :2], axis=1)
+                    # pick = np.argsort(dists_all)[:self.max_neighbors]
+                    # self._neighbor_counts.append(len(pick))
+                    # sel = feats_t[pick]                    
+                    #compute distance of every neighbor to ego
+                    dists_all = np.linalg.norm(feats_t[:, :2], axis=1)
+                    if self.neighbor_radius is not None:
+                        # keep all within radius
+                        pick = np.where(dists_all <= self.neighbor_radius)[0]
+                    else:
+                        # fallback to top-K nearest
+                        pick = np.argsort(dists_all)[:self.max_neighbors]
+
+                    # enforce an upper‐bound of max_neighbors
+                    if len(pick) > self.max_neighbors:
+                        pick = pick[:self.max_neighbors]
                     self._neighbor_counts.append(len(pick))
-                    sel = feats_t[pick].copy()
+                    sel = feats_t[pick]
                     sel = (sel - self.feat_mean) / self.feat_std
                     c = sel.shape[0]
                     if c < self.max_neighbors:
