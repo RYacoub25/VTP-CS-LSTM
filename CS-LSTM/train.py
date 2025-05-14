@@ -24,15 +24,16 @@ def visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_exampl
     collected = 0
     figs = []
     with torch.no_grad():
-        for hist_e, hist_t, hist_o, mask_o, ctx, fut in val_loader:
+        for hist_e, hist_t, hist_o, mask_o, ctx, intent, fut in val_loader:
             hist_e = hist_e.to(device)
             hist_t = hist_t.to(device)
             hist_o = hist_o.to(device)
             mask_o = mask_o.to(device)
             ctx    = ctx.to(device)
+            intent = intent.to(device)
             fut    = fut.to(device)
 
-            pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx)  # [B×L×2]
+            pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)  # [B×L×2]
             # only pred_len=1 case? if longer, you can plot whole curve
             # here we assume pred_len==1
             # denormalize both
@@ -130,6 +131,7 @@ def train(
     model = ContextualSocialLSTM(
         input_dim     = len(ds.features),
         context_dim   = ds.context.shape[1],
+        intent_dim    = 3 if use_intention else 0,
         hidden_dim    = hidden_dim,
         max_neighbors = max_neighbors,
         pred_len      = pred_len
@@ -145,7 +147,7 @@ def train(
 
         loader = train_loader
         pbar   = tqdm(loader, desc=f"Epoch {ep:>2}", unit="batch")
-        for i, (hist_e, hist_t, hist_o, mask_o, ctx, fut) in enumerate(pbar):
+        for i, (hist_e, hist_t, hist_o, mask_o, ctx,intent, fut) in enumerate(pbar):
             t0 = time.perf_counter()
 
             # 1) measure host→device copy
@@ -155,12 +157,13 @@ def train(
             hist_o = hist_o.to(device, non_blocking=True)
             mask_o = mask_o.to(device, non_blocking=True)
             ctx    = ctx.to(device,    non_blocking=True)
+            intent = intent.to(device, non_blocking=True)
             fut    = fut.to(device,    non_blocking=True)
             t_after_copy = time.perf_counter()
 
             # 2) measure forward/backward
             opt.zero_grad()
-            pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx)
+            pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)
             loss     = loss_fn(pred_seq, fut.unsqueeze(1))
             loss.backward()
             opt.step()
@@ -183,15 +186,16 @@ def train(
         model.eval()
         sum_ade_m, sum_fde_m, cnt = 0.0, 0.0, 0
         with torch.no_grad():
-            for hist_e, hist_t, hist_o, mask_o, ctx, fut in val_loader:
+            for hist_e, hist_t, hist_o, mask_o, ctx,intent, fut in val_loader:
                 hist_e = hist_e.to(device, non_blocking=True)
                 hist_t = hist_t.to(device, non_blocking=True)
                 hist_o = hist_o.to(device, non_blocking=True)
                 mask_o = mask_o.to(device, non_blocking=True)
                 ctx    = ctx.to(device, non_blocking=True)
+                intent = intent.to(device, non_blocking=True)
                 fut    = fut.to(device, non_blocking=True)
 
-                pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx)
+                pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)
                 gt_seq   = fut.unsqueeze(1)
 
                 # de-normalize and compute ADE/FDE
