@@ -14,29 +14,43 @@ class ArgoverseNeighborDataset(Dataset):
                  max_neighbors: int = 10,
                  use_delta_yaw: bool = False,
                  use_context: bool = True,
+                 use_intention: bool = False,
                  features=None):
         if features is None:
             features = ['x','y','z','vx','vy','vz','ax','ay','az']
             if use_delta_yaw:
                 features.append('delta_yaw')
+            if use_intention:
+                features.append('intention')
         self.seq_len       = seq_len
         self.pred_len      = pred_len
         self.max_neighbors = max_neighbors
         self.use_delta_yaw = use_delta_yaw
         self.features      = features
+        self.use_intention = use_intention
+        
 
         # for diagnostics
         self._neighbor_counts = []
 
         # 1) load ego CSV
         self.ego_df = pd.read_csv(ego_path)
+        self.ego_group = self.ego_df.groupby('timestamp_ns')
         # — ego has yaw but no delta_yaw: compute it if requested
         if use_delta_yaw:
             self.ego_df = self.ego_df.sort_values('timestamp_ns')
             self.ego_df['delta_yaw'] = self.ego_df['yaw'].diff().fillna(0.0)
 
+        if use_intention:
+            thr = 0.1  # rad/s, or tweak to your liking
+            # ensure delta_yaw exists
+            if 'delta_yaw' not in self.ego_df:
+                self.ego_df['delta_yaw'] = self.ego_df['yaw'].diff().fillna(0.0)
+            self.ego_df['intention'] = (self.ego_df['delta_yaw'].abs() > thr).astype(float)
+
         # 2) load social CSV
         self.social_df = pd.read_csv(social_path)
+        self.social_group = self.social_df.groupby('timestamp_ns')
         # — social already has delta_yaw in your file; only compute if missing
         if use_delta_yaw and 'delta_yaw' not in self.social_df.columns:
             self.social_df = self.social_df.sort_values(['track_uuid','timestamp_ns'])
@@ -46,10 +60,26 @@ class ArgoverseNeighborDataset(Dataset):
                     .diff()
                     .fillna(0.0)
             )
+        if use_intention:
+            # store raw yaw per-timestamp
+            self.social_yaw={}
+            for ts, df_ts in self.social_group:
+                self.social_yaw[ts]=df_ts['delta_yaw'].values
+            self.ego_yaw = {
+                ts: df_ts['delta_yaw'].iloc[0]
+                for ts, df_ts in self.ego_df.groupby('timestamp_ns')
+            }
 
         self.context   = np.load(contextual_path)
-
-
+        # — compute intention on social vehicles as well
+        if use_intention:
+            thr = 0.1
+            if 'delta_yaw' not in self.social_df:
+                self.social_df['delta_yaw'] = (
+                    self.social_df.groupby('track_uuid')['yaw']
+                        .diff().fillna(0.0)
+                )
+            self.social_df['intention'] = (self.social_df['delta_yaw'].abs() > thr).astype(float)
 
 
         # 2) group by timestamp
