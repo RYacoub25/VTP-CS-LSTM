@@ -11,12 +11,17 @@ import time
 from dataset import ArgoverseNeighborDataset
 from model   import ContextualSocialLSTM
 
-def compute_ade_fde(preds: torch.Tensor, gts: torch.Tensor) -> (float, float):
-    if preds.dim() == 2:
-        preds = preds.unsqueeze(1)
-        gts   = gts.unsqueeze(1)
-    dists = torch.norm(preds - gts, dim=-1)
-    return float(dists.mean()), float(dists[:, -1].mean())
+def compute_ade_fde(preds: torch.Tensor,
+                    gts:   torch.Tensor):
+    # preds, gts: [B × L × 2]
+    # Euclidean distance at each horizon:
+    dists = torch.norm(preds - gts, dim=-1)  # [B × L]
+    # ADE = average over batch and time:
+    ade = dists.mean()
+    # FDE = last time-step error averaged over batch:
+    fde = dists[:, -1].mean()
+    return ade.item(), fde.item(), dists  # return full dists if you want per‐horizon
+
 
 def visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_examples=5):
     model.eval()
@@ -39,7 +44,7 @@ def visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_exampl
             # denormalize both
             # hist_t[:,:,0:2] + fut[:,0:2], pred_seq[:,:,0:2]
             hist_xy = hist_t[:, :, :2] * sigma_xy + mu_xy    # [B×T×2]
-            fut_xy  = fut.unsqueeze(1) * sigma_xy + mu_xy    # [B×1×2]
+            fut_xy  = fut * sigma_xy + mu_xy    # [B×1×2]
             pred_xy = pred_seq * sigma_xy + mu_xy            # [B×1×2]
 
             B = hist_xy.size(0)
@@ -167,7 +172,7 @@ def train(
             # 2) measure forward/backward
             opt.zero_grad()
             pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)
-            loss     = loss_fn(pred_seq, fut.unsqueeze(1))
+            loss     = loss_fn(pred_seq, fut)
             loss.backward()
             opt.step()
             t_after_step = time.perf_counter()
@@ -185,38 +190,58 @@ def train(
 
         avg_loss = total_loss / len(train_loader)
 
-        # 7) Validation (in meters)
-        model.eval()
-        sum_ade_m, sum_fde_m, cnt = 0.0, 0.0, 0
-        with torch.no_grad():
-            for hist_e, hist_t, hist_o, mask_o, ctx,intent, fut in val_loader:
-                hist_e = hist_e.to(device, non_blocking=True)
-                hist_t = hist_t.to(device, non_blocking=True)
-                hist_o = hist_o.to(device, non_blocking=True)
-                mask_o = mask_o.to(device, non_blocking=True)
-                ctx    = ctx.to(device, non_blocking=True)
-                intent = intent.to(device, non_blocking=True)
-                fut    = fut.to(device, non_blocking=True)
+       # 7) Validation (multi‐horizon ADE)
+    model.eval()
+    sum_dists  = torch.zeros(model.pred_len, device=device)
+    sum_ade_m, sum_fde_m, cnt = 0.0, 0.0,0
+    total_seqs = 0
+    with torch.no_grad():
+        for hist_e, hist_t, hist_o, mask_o, ctx, intent, fut in val_loader:
+            # move to device
+            hist_e, hist_t, hist_o = [x.to(device, non_blocking=True) for x in (hist_e, hist_t, hist_o)]
+            mask_o                  = mask_o.to(device,    non_blocking=True)
+            ctx, intent, fut        = [x.to(device,    non_blocking=True) for x in (ctx, intent, fut)]
 
-                pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)
-                gt_seq   = fut.unsqueeze(1)
+            # forward
+            pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)  # [B × pred_len × 2]
 
-                # de-normalize and compute ADE/FDE
-                pred_m = pred_seq * sigma_xy + mu_xy
-                gt_m   = gt_seq   * sigma_xy + mu_xy
-                ade_m, fde_m = compute_ade_fde(pred_m, gt_m)
+            # de-normalize
+            pred_m = pred_seq * sigma_xy + mu_xy   # [B × pred_len × 2]
+            gt_m   = fut      * sigma_xy + mu_xy   # [B × pred_len × 2]
 
-                sum_ade_m += ade_m * fut.size(0)
-                sum_fde_m += fde_m * fut.size(0)
-                cnt      += fut.size(0)
+            # L2 error per horizon
+            dists = torch.norm(pred_m - gt_m, dim=-1)  # [B × pred_len]
+            # overall ADE / FDE accumulation
+            ade_m, fde_m = compute_ade_fde(pred_m, gt_m)
+            sum_ade_m += ade_m * fut.size(0)
+            sum_fde_m += fde_m * fut.size(0)
+            cnt      += fut.size(0)
 
-        val_ade_m = sum_ade_m / cnt
-        val_fde_m = sum_fde_m / cnt
-        print(f"Epoch {ep}: Train L {avg_loss:.4f} | Val ADE {val_ade_m:.4f} m | FDE {val_fde_m:.4f} m")
 
-        if val_ade_m < best_val:
-            best_val = val_ade_m
-            torch.save(model.state_dict(), "best_contextual_social_lstm.pth")
+            sum_dists  += dists.sum(dim=0)   # accumulate over batch
+            total_seqs += dists.size(0)
+
+        dists    = torch.norm(pred_m - gt_m, dim=-1)    # [B×pred_len]
+        ade_per_t= dists.mean(dim=0)                    # [pred_len]
+        fde_per_t= dists[:, -1]                         # [B]
+        print()
+        # compute ADE per horizon
+        ade_per_t = sum_dists / total_seqs    # [pred_len]
+        for h, ade_h in enumerate(ade_per_t, start=1):
+            print(f"  → Horizon {h}: ADE = {ade_h:.4f} m")
+        print(f"  Final‐step FDE: {fde_per_t.mean():.4f} m")
+        print()
+    val_ade_m = sum_ade_m / cnt
+    val_fde_m = sum_fde_m / cnt
+    overall_ade = ade_per_t.mean().item()
+    final_fde   = ade_per_t[-1].item()
+    print(f"  Overall ADE = {overall_ade:.4f} m | Final-step FDE = {final_fde:.4f} m")
+    print(f"Epoch {ep}: Train L {avg_loss:.4f} | Val ADE {val_ade_m:.4f} m | FDE {val_fde_m:.4f} m")
+
+    # snapshot best
+    if overall_ade < best_val:
+        best_val = overall_ade
+        torch.save(model.state_dict(), "best_contextual_social_lstm.pth")
     # === at the bottom of your train() function, after saving the model ===
     # assuming you still have: 
     #   model, val_loader, mu_xy, sigma_xy, device
@@ -232,9 +257,9 @@ def main():
     p.add_argument("--social_csv",   default="data/processed/social_vehicles_relative.csv")
     p.add_argument("--contextual_npy",  default="data/processed/contextual_features_merged.npy")
     p.add_argument("--seq_len",  type=int,   default=30)
-    p.add_argument("--pred_len", type=int,   default=1)
+    p.add_argument("--pred_len", type=int,   default=30)
     p.add_argument("--max_neighbors", type=int, default=10)
-    p.add_argument("--neighbor_radius", type=float, default=5.0)
+    p.add_argument("--neighbor_radius", type=float, default=10.0)
     p.add_argument("--batch",    type=int,   default=64)
     p.add_argument("--hidden",   type=int,   default=128)
     p.add_argument("--lr",       type=float, default=1e-3)
@@ -263,16 +288,8 @@ def main():
         "use_context":    not args.no_context,
         "use_intention":  args.use_intention
     }
-    best = {}
-    for r in [3.0, 5.0, 7.5, 10.0]:
-        print(f"\n=== Running with neighbor_radius = {r} m ===")
-        params["neighbor_radius"] = r
-        ade = train(**params)
-        print(f"→ radius {r:.1f} m gives ADE = {ade:.4f} m")
-        best[r] = ade
 
-    best_radius = min(best, key=best.get)
-    print(f"\n🎯 Best radius: {best_radius:.1f} m (ADE = {best[best_radius]:.4f} m)")
+    train(**params)
 
 if __name__ == "__main__":
     main()

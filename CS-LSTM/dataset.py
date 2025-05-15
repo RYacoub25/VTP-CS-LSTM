@@ -154,11 +154,6 @@ class ArgoverseNeighborDataset(Dataset):
                 hist_others = []; mask_others = []
                 for t in hist_times:
                     ids_t, feats_t, _ = self.social_data[t]
-                    # dists_all = np.linalg.norm(feats_t[:, :2], axis=1)
-                    # pick = np.argsort(dists_all)[:self.max_neighbors]
-                    # self._neighbor_counts.append(len(pick))
-                    # sel = feats_t[pick]                    
-                    #compute distance of every neighbor to ego
                     dists_all = np.linalg.norm(feats_t[:, :2], axis=1)
                     if self.neighbor_radius is not None:
                         # keep all within radius
@@ -193,12 +188,25 @@ class ArgoverseNeighborDataset(Dataset):
                     hist_ego.append(raw_e)
                 hist_ego = np.stack(hist_ego)
 
-                # 4) future Δpos
-                ids_fut, feats_fut, idx_map_fut = self.social_data[future_time]
-                if tid not in idx_map_fut: continue
-                raw_fut = feats_fut[idx_map_fut[tid]].copy()
-                raw_fut = (raw_fut - self.feat_mean.flatten()) / self.feat_std.flatten()
-                future_pos = raw_fut[:2]
+                # 4) future Δpos *sequence* of length pred_len
+                fut_seq = []
+                ok_fut = True
+                for j in range(1, self.pred_len + 1):
+                    ft = T[i + self.seq_len - 1 + j]
+                    if ft not in self.social_data:
+                        ok_fut = False; break
+                    ids_fut, feats_fut, idx_map_fut = self.social_data[ft]
+                    if tid not in idx_map_fut:
+                        ok_fut = False; break
+                    raw_fut = feats_fut[idx_map_fut[tid]].copy()
+                    # normalize
+                    raw_fut = (raw_fut - self.feat_mean.flatten()) / self.feat_std.flatten()
+                    # only keep x,y
+                    fut_seq.append(raw_fut[:2])
+                if not ok_fut:
+                    continue
+                future_pos = np.stack(fut_seq)   # shape = [pred_len × 2]
+
 
                 # --- 5) intention one-hot ---
                 if self.use_intention:
