@@ -78,6 +78,7 @@ def train(
     pred_len: int,
     max_neighbors: int,
     neighbor_radius: float,
+    target_radius: float,
     batch_size: int,
     hidden_dim: int,
     lr: float,
@@ -94,6 +95,7 @@ def train(
         contextual_path = contextual_npy,
         seq_len         = seq_len,
         pred_len        = pred_len,
+        target_radius   = 30.0,
         max_neighbors   = max_neighbors,
         use_delta_yaw   = use_delta_yaw,
         use_context     = use_context,
@@ -113,6 +115,8 @@ def train(
     tr_ds, val_ds = random_split(ds, [n_trn, n_val])
 
     # 4) Loaders (parallel & pinned)
+    if len(ds) == 0:
+        raise RuntimeError("Training set is empty! Check your target_radius or timestamp filtering.")
     train_loader = DataLoader(
         tr_ds,
         batch_size=batch_size,
@@ -233,6 +237,7 @@ def main():
     p.add_argument("--contextual_npy",  default="data/processed/contextual_features_merged.npy")
     p.add_argument("--seq_len",  type=int,   default=30)
     p.add_argument("--pred_len", type=int,   default=1)
+    p.add_argument("--target_radius", type=float, default=30.0)
     p.add_argument("--max_neighbors", type=int, default=10)
     p.add_argument("--neighbor_radius", type=float, default=5.0)
     p.add_argument("--batch",    type=int,   default=64)
@@ -255,6 +260,7 @@ def main():
         "pred_len":       args.pred_len,
         "max_neighbors":  args.max_neighbors,
         "neighbor_radius": args.neighbor_radius,
+        "target_radius":  args.target_radius,
         "batch_size":     args.batch,
         "hidden_dim":     args.hidden,
         "lr":             args.lr,
@@ -263,16 +269,6 @@ def main():
         "use_context":    not args.no_context,
         "use_intention":  args.use_intention
     }
-    best = {}
-    for r in [3.0, 5.0, 7.5, 10.0]:
-        print(f"\n=== Running with neighbor_radius = {r} m ===")
-        params["neighbor_radius"] = r
-        ade = train(**params)
-        print(f"→ radius {r:.1f} m gives ADE = {ade:.4f} m")
-        best[r] = ade
-
-    best_radius = min(best, key=best.get)
-    print(f"\n🎯 Best radius: {best_radius:.1f} m (ADE = {best[best_radius]:.4f} m)")
-
+    train(**params)
 if __name__ == "__main__":
     main()
