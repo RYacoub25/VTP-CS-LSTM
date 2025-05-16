@@ -11,6 +11,7 @@ class ArgoverseNeighborDataset(Dataset):
                  contextual_path: str,
                  seq_len: int = 30,
                  pred_len: int = 1,
+                 target_radius: float = None,
                  max_neighbors: int = 10,
                  use_delta_yaw: bool = False,
                  neighbor_radius: float = None,
@@ -24,11 +25,13 @@ class ArgoverseNeighborDataset(Dataset):
         """
         self.seq_len       = seq_len
         self.pred_len      = pred_len
+        self.target_radius = target_radius  # in the same units as your positions
         self.max_neighbors = max_neighbors
         self.use_delta_yaw = use_delta_yaw
         self.use_context   = use_context
         self.use_intention = use_intention
         self.neighbor_radius = neighbor_radius
+        
 
         # 1) build feature list
         if features is None:
@@ -96,6 +99,8 @@ class ArgoverseNeighborDataset(Dataset):
         # 11) build numpy samples (with progress bar)
         self._neighbor_counts = []
         self.samples = self._prepare_samples()
+        print(f">>> Built {len(self.samples)} samples")
+
 
         # 12) convert all to torch.Tensor (no progress bar here)
         for i, s in enumerate(self.samples):
@@ -131,10 +136,38 @@ class ArgoverseNeighborDataset(Dataset):
             target_time = hist_times[-1]
             future_time = T[i + self.seq_len - 1 + self.pred_len]
             if future_time not in self.social_data:
+                print("missing future_time:", future_time)    
                 continue
 
             ids_targ, feats_targ, idx_map_targ = self.social_data[target_time]
+            raw_count = len(ids_targ)
+
+            # 2) compute the ego’s raw (x,y) at that time
+            #    note: self.ego_data[t] is the same raw feature vector you normalize later
+            ego_raw = self.ego_data[target_time]       # e.g., array([x, y, vx, vy, …])
+            ego_xy  = ego_raw[:2]                     # first two entries are x,y            
             ctx_feat = zero_ctx if zero_ctx is not None else self.context[i + self.seq_len - 1].copy()
+            if i == 0:  # only print once for the first window
+                print("DEBUG window 0:")
+                print("  target_radius =", self.target_radius)
+                print("  ego_xy        =", ego_xy)
+                # show the first few target positions & their distances
+                for j, uid in enumerate(ids_targ[:5]):
+                    idx = idx_map_targ[uid]
+                    targ_xy = feats_targ[idx][:2]
+                    dist    = np.linalg.norm(targ_xy - ego_xy)
+                    print(f"   tid {uid[:8]}: targ_xy={targ_xy}, dist={dist:.2f}")            
+            # 3) filter out any target beyond your desired radius
+            if self.target_radius is not None:
+                kept = []
+                for tid in ids_targ:
+                    i_t = idx_map_targ[tid]
+                    # feats_targ[i_t][:2] is already (dx,dy) from ego
+                    rel_xy = feats_targ[i_t][:2]
+                    dist   = np.linalg.norm(rel_xy)
+                    if dist <= self.target_radius:
+                        kept.append(tid)
+                ids_targ = kept
 
             for tid in ids_targ:
                 # 1) target history
