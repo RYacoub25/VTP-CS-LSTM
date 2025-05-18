@@ -147,16 +147,7 @@ class ArgoverseNeighborDataset(Dataset):
             ego_raw = self.ego_data[target_time]       # e.g., array([x, y, vx, vy, …])
             ego_xy  = ego_raw[:2]                     # first two entries are x,y            
             ctx_feat = zero_ctx if zero_ctx is not None else self.context[i + self.seq_len - 1].copy()
-            if i == 0:  # only print once for the first window
-                print("DEBUG window 0:")
-                print("  target_radius =", self.target_radius)
-                print("  ego_xy        =", ego_xy)
-                # show the first few target positions & their distances
-                for j, uid in enumerate(ids_targ[:5]):
-                    idx = idx_map_targ[uid]
-                    targ_xy = feats_targ[idx][:2]
-                    dist    = np.linalg.norm(targ_xy - ego_xy)
-                    print(f"   tid {uid[:8]}: targ_xy={targ_xy}, dist={dist:.2f}")            
+
             # 3) filter out any target beyond your desired radius
             if self.target_radius is not None:
                 kept = []
@@ -220,26 +211,32 @@ class ArgoverseNeighborDataset(Dataset):
                     raw_e = (raw_e - self.feat_mean.flatten()) / self.feat_std.flatten()
                     hist_ego.append(raw_e)
                 hist_ego = np.stack(hist_ego)
+                #4
+                # normalized (x,y) at the end of history
+                base_raw       = feats_targ[idx_map_targ[tid]].copy()
+                prev_norm      = (base_raw - self.feat_mean.flatten()) / self.feat_std.flatten()
+                prev_xy_norm   = prev_norm[:2]
 
-                # 4) future Δpos *sequence* of length pred_len
                 fut_seq = []
-                ok_fut = True
                 for j in range(1, self.pred_len + 1):
                     ft = T[i + self.seq_len - 1 + j]
-                    if ft not in self.social_data:
-                        ok_fut = False; break
                     ids_fut, feats_fut, idx_map_fut = self.social_data[ft]
                     if tid not in idx_map_fut:
-                        ok_fut = False; break
-                    raw_fut = feats_fut[idx_map_fut[tid]].copy()
-                    # normalize
-                    raw_fut = (raw_fut - self.feat_mean.flatten()) / self.feat_std.flatten()
-                    # only keep x,y
-                    fut_seq.append(raw_fut[:2])
-                if not ok_fut:
-                    continue
-                future_pos = np.stack(fut_seq)   # shape = [pred_len × 2]
+                        continue
+                    raw_fut     = feats_fut[idx_map_fut[tid]].copy()
+                    fut_norm    = (raw_fut - self.feat_mean.flatten()) / self.feat_std.flatten()
+                    curr_xy_norm= fut_norm[:2]
 
+                    # **incremental** displacement since last frame
+                    disp_norm   = curr_xy_norm - prev_xy_norm
+                    fut_seq.append(disp_norm)
+
+                    # update for next step
+                    prev_xy_norm = curr_xy_norm
+                # only keep this sample if we got a full pred_len steps
+                if len(fut_seq) != self.pred_len:
+                    continue
+                future_pos = np.stack(fut_seq, axis=0).astype(np.float32)
 
                 # --- 5) intention one-hot ---
                 if self.use_intention:

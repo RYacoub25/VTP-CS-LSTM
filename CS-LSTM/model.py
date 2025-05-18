@@ -113,6 +113,9 @@ class ContextualSocialLSTM(nn.Module):
         if self.pred_len == 1:
             # [B × 2] → [B × 1 × 2]
             return pred_init.unsqueeze(1)
+        # if we didn’t set up an intention head, ignore the intent tensor
+        if self.intent_fc is None:
+            intent = None
         # — 6) Sequence‐to‐sequence decoding —
         #    feed first‐step pred back in for pred_len steps
         outputs = []
@@ -134,7 +137,7 @@ class ContextualSocialLSTM(nn.Module):
             ]
             # stack into [B × 3 × 1 × 2]
             stacked = torch.stack(head_outs, dim=1)
-            if intent is None:
+            if self.intent_fc is None:
                 # average across modes → [B × 1 × 2]
                 step_d = stacked.mean(dim=1)
             else:

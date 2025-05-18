@@ -11,6 +11,7 @@ import time
 from dataset import ArgoverseNeighborDataset
 from model   import ContextualSocialLSTM
 
+
 def compute_ade_fde(preds: torch.Tensor, gts: torch.Tensor) -> (float, float):
     if preds.dim() == 2:
         preds = preds.unsqueeze(1)
@@ -20,7 +21,6 @@ def compute_ade_fde(preds: torch.Tensor, gts: torch.Tensor) -> (float, float):
 
 def visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_examples=5):
     model.eval()
-    # grab a handful of batches until we have num_examples
     collected = 0
     figs = []
     with torch.no_grad():
@@ -34,42 +34,46 @@ def visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_exampl
             fut    = fut.to(device)
 
             pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)  # [B×L×2]
-            # only pred_len=1 case? if longer, you can plot whole curve
-            # here we assume pred_len==1
-            # denormalize both
-            # hist_t[:,:,0:2] + fut[:,0:2], pred_seq[:,:,0:2]
+
+            # Denormalize history (absolute global positions)
             hist_xy = hist_t[:, :, :2] * sigma_xy + mu_xy    # [B×T×2]
-            fut_xy  = fut.unsqueeze(1) * sigma_xy + mu_xy    # [B×1×2]
-            pred_xy = pred_seq * sigma_xy + mu_xy            # [B×1×2]
+
+            # Denormalize relative displacements (future and predicted)
+            fut_disp = fut * sigma_xy                         # [B×L×2]
+            pred_disp = pred_seq * sigma_xy                   # [B×L×2]
 
             B = hist_xy.size(0)
             for b in range(B):
-                figs.append((hist_xy[b].cpu().numpy(),
-                             fut_xy[b,0].cpu().numpy(),
-                             pred_xy[b,0].cpu().numpy()))
+                hist = hist_xy[b].cpu().numpy()              # [T×2]
+                last_pos = hist[-1]                           # last history point (2,)
+
+                # Convert relative displacements to absolute positions by cumulative sum
+                fut_disp_np = fut_disp[b].cpu().numpy()
+                pred_disp_np = pred_disp[b].cpu().numpy()
+                fut_abs = last_pos + np.cumsum(fut_disp_np, axis=0)
+                pred_abs = last_pos + np.cumsum(pred_disp_np, axis=0)
+
+                figs.append((hist, fut_abs, pred_abs))
                 collected += 1
                 if collected >= num_examples:
                     break
             if collected >= num_examples:
                 break
 
-    # now plot
     for i, (hist, fut, pred) in enumerate(figs):
-        plt.figure(figsize=(4,4))
-        # history
-        plt.plot(hist[:,0], hist[:,1], '-o', color='gray', label='history')
-        # true future
-        plt.scatter(fut[0], fut[1], color='green', s=100, marker='*', label='ground truth')
-        # predicted
-        plt.scatter(pred[0], pred[1], color='red', s=100, marker='X', label='prediction')
+        plt.figure(figsize=(5,5))
+        # Plot history trajectory
+        plt.plot(hist[:, 0], hist[:, 1], 'o-', color='gray', label='history')
+        # Plot ground truth future trajectory
+        plt.plot(fut[:, 0], fut[:, 1], 'o-', color='green', label='ground truth')
+        # Plot predicted future trajectory
+        plt.plot(pred[:, 0], pred[:, 1], 'x-', color='red', label='prediction')
         plt.title(f"Val Sample #{i+1}")
-        plt.xlabel("Δx (m)"); plt.ylabel("Δy (m)")
+        plt.xlabel("Δx (m)")
+        plt.ylabel("Δy (m)")
         plt.axis('equal')
         plt.legend()
         plt.show()
-
-
-
 def train(
     ego_csv: str,
     social_csv: str,
@@ -171,7 +175,7 @@ def train(
             # 2) measure forward/backward
             opt.zero_grad()
             pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)
-            loss     = loss_fn(pred_seq, fut.unsqueeze(1))
+            loss     = loss_fn(pred_seq, fut)
             loss.backward()
             opt.step()
             t_after_step = time.perf_counter()
@@ -203,7 +207,7 @@ def train(
                 fut    = fut.to(device, non_blocking=True)
 
                 pred_seq = model(hist_e, hist_t, hist_o, mask_o, ctx, intent)
-                gt_seq   = fut.unsqueeze(1)
+                gt_seq   = fut
 
                 # de-normalize and compute ADE/FDE
                 pred_m = pred_seq * sigma_xy + mu_xy
@@ -236,7 +240,7 @@ def main():
     p.add_argument("--social_csv",   default="data/processed/social_vehicles_relative.csv")
     p.add_argument("--contextual_npy",  default="data/processed/contextual_features_merged.npy")
     p.add_argument("--seq_len",  type=int,   default=30)
-    p.add_argument("--pred_len", type=int,   default=1)
+    p.add_argument("--pred_len", type=int,   default=30)
     p.add_argument("--target_radius", type=float, default=30.0)
     p.add_argument("--max_neighbors", type=int, default=10)
     p.add_argument("--neighbor_radius", type=float, default=5.0)
