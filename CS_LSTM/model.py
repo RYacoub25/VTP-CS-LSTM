@@ -8,9 +8,9 @@ class ContextualSocialLSTM(nn.Module):
                  context_dim: int,
                  intent_dim:  int = 0,
                  hidden_dim: int = 128,
-                 max_neighbors: int = 10,
                  num_heads: int = 4,
-                 pred_len: int = 1):
+                 pred_len: int = 1,
+                 use_delta_yaw=False):
         """
         input_dim   = number of features per agent (e.g. 9)
         context_dim = dimension of your contextual_features vector
@@ -22,8 +22,8 @@ class ContextualSocialLSTM(nn.Module):
         super().__init__()
         self.pred_len      = pred_len
         self.hidden_dim    = hidden_dim
-        self.max_neighbors = max_neighbors
         self.intent_dim   = intent_dim
+        self.input_dim = input_dim + 1 if use_delta_yaw else input_dim
 
         # 1) Encode ego history
         self.ego_lstm      = nn.LSTM(input_dim, hidden_dim, batch_first=True)

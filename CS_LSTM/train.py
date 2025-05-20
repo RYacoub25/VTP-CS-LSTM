@@ -24,7 +24,7 @@ def visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_exampl
     collected = 0
     figs = []
     with torch.no_grad():
-        for hist_e, hist_t, hist_o, mask_o, ctx, intent, fut in val_loader:
+        for hist_e, hist_t, hist_o, mask_o, ctx, intent, fut,tid,ts in val_loader:
             hist_e = hist_e.to(device)
             hist_t = hist_t.to(device)
             hist_o = hist_o.to(device)
@@ -99,7 +99,7 @@ def train(
         contextual_path = contextual_npy,
         seq_len         = seq_len,
         pred_len        = pred_len,
-        target_radius   = 30.0,
+        target_radius   = target_radius,
         max_neighbors   = max_neighbors,
         use_delta_yaw   = use_delta_yaw,
         use_context     = use_context,
@@ -137,15 +137,21 @@ def train(
         pin_memory=True,
    #     prefetch_factor=2
     )
-
+    print("input dim"+str(len(ds.features)))
+    print("context dim"+str(ds.context.shape[1]))
+    print("intent dim"+str(3 if use_intention else 0))
+    print("hidden dim"+str(hidden_dim))
+    print("pred len"+str(pred_len))
+    print("use delta yaw"+str(use_delta_yaw))    
     # 5) Model, opt, loss
     model = ContextualSocialLSTM(
         input_dim     = len(ds.features),
         context_dim   = ds.context.shape[1],
         intent_dim    = 3 if use_intention else 0,
         hidden_dim    = hidden_dim,
-        max_neighbors = max_neighbors,
-        pred_len      = pred_len
+        pred_len      = pred_len,
+        use_delta_yaw = use_delta_yaw  # Adjust input_dim based on delta_yaw
+
     ).to(device)
     opt     = optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
@@ -158,7 +164,7 @@ def train(
 
         loader = train_loader
         pbar   = tqdm(loader, desc=f"Epoch {ep:>2}", unit="batch")
-        for i, (hist_e, hist_t, hist_o, mask_o, ctx,intent, fut) in enumerate(pbar):
+        for i, (hist_e, hist_t, hist_o, mask_o, ctx,intent, fut,tid,ts) in enumerate(pbar):
             t0 = time.perf_counter()
 
             # 1) measure host→device copy
@@ -197,7 +203,7 @@ def train(
         model.eval()
         sum_ade_m, sum_fde_m, cnt = 0.0, 0.0, 0
         with torch.no_grad():
-            for hist_e, hist_t, hist_o, mask_o, ctx,intent, fut in val_loader:
+            for hist_e, hist_t, hist_o, mask_o, ctx,intent, fut,tid,ts in val_loader:
                 hist_e = hist_e.to(device, non_blocking=True)
                 hist_t = hist_t.to(device, non_blocking=True)
                 hist_o = hist_o.to(device, non_blocking=True)
@@ -224,55 +230,46 @@ def train(
 
         if val_ade_m < best_val:
             best_val = val_ade_m
-            torch.save(model.state_dict(), "best_contextual_social_lstm.pth")
+            print("input_dim:", len(ds.features), "context_dim:", ds.context.shape[1], "intent_dim:", 3 if use_intention else 0, "hidden_dim:", hidden_dim, "pred_len:", pred_len)
+            torch.save({
+    'model_state_dict': model.state_dict(),
+    'config': {
+        'input_dim': len(ds.features),
+        'context_dim': ds.context.shape[1],
+        'intent_dim': 3 if use_intention else 0,
+        'hidden_dim': hidden_dim,
+        'pred_len': pred_len,
+        'use_delta_yaw': use_delta_yaw,
+    }
+}, "best_contextual_social_lstm.pth")
     # === at the bottom of your train() function, after saving the model ===
     # assuming you still have: 
     #   model, val_loader, mu_xy, sigma_xy, device
     print("\n📊 Visualization of a few validation predictions:")
     visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_examples=5)
+    print(f"🏆 New best ADE {best_val:.4f} m")
 
     return best_val
 
 def main():
-    import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("--ego_csv",      default="data/processed/ego_vehicle_with_intention.csv")
-    p.add_argument("--social_csv",   default="data/processed/social_vehicles_relative.csv")
-    p.add_argument("--contextual_npy",  default="data/processed/contextual_features_merged.npy")
-    p.add_argument("--seq_len",  type=int,   default=30)
-    p.add_argument("--pred_len", type=int,   default=30)
-    p.add_argument("--target_radius", type=float, default=30.0)
-    p.add_argument("--max_neighbors", type=int, default=10)
-    p.add_argument("--neighbor_radius", type=float, default=5.0)
-    p.add_argument("--batch",    type=int,   default=64)
-    p.add_argument("--hidden",   type=int,   default=128)
-    p.add_argument("--lr",       type=float, default=1e-3)
-    p.add_argument("--epochs",   type=int,   default=20)
-    p.add_argument("--use_delta_yaw", action="store_true",
-                   help="Include delta_yaw as an extra feature channel"),
-    p.add_argument("--no_context",   action="store_true", help="disable contextual features")
-    p.add_argument("--use_intention", action="store_true",
-                   help="add 3-way turn/straight intention to context")
-    args = p.parse_args()
 
-    # Pull all args into a dict, but pop off `use_delta_yaw`
-    params = {
-        "ego_csv":        args.ego_csv,
-        "social_csv":     args.social_csv,
-        "contextual_npy": args.contextual_npy,
-        "seq_len":        args.seq_len,
-        "pred_len":       args.pred_len,
-        "max_neighbors":  args.max_neighbors,
-        "neighbor_radius": args.neighbor_radius,
-        "target_radius":  args.target_radius,
-        "batch_size":     args.batch,
-        "hidden_dim":     args.hidden,
-        "lr":             args.lr,
-        "epochs":         args.epochs,
-        "use_delta_yaw":  args.use_delta_yaw,
-        "use_context":    not args.no_context,
-        "use_intention":  args.use_intention
-    }
-    train(**params)
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=None,
+    neighbor_radius=10,
+    target_radius=30.0,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=True,
+    use_context=True,
+    use_intention=True,
+    )
+    
 if __name__ == "__main__":
     main()

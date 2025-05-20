@@ -12,11 +12,11 @@ class ArgoverseNeighborDataset(Dataset):
                  seq_len: int = 30,
                  pred_len: int = 1,
                  target_radius: float = None,
-                 max_neighbors: int = 10,
-                 use_delta_yaw: bool = False,
-                 neighbor_radius: float = None,
+                 max_neighbors: int = None,
+                 use_delta_yaw: bool = True,
+                 neighbor_radius: float = 10,
                  use_context: bool = True,
-                 use_intention: bool = False,
+                 use_intention: bool = True,
                  features=None):
         """
         - use_delta_yaw:  if True, append Δyaw into each agent’s feature vector
@@ -26,7 +26,7 @@ class ArgoverseNeighborDataset(Dataset):
         self.seq_len       = seq_len
         self.pred_len      = pred_len
         self.target_radius = target_radius  # in the same units as your positions
-        self.max_neighbors = max_neighbors
+        self.max_neighbors = 10
         self.use_delta_yaw = use_delta_yaw
         self.use_context   = use_context
         self.use_intention = use_intention
@@ -36,7 +36,7 @@ class ArgoverseNeighborDataset(Dataset):
         # 1) build feature list
         if features is None:
             features = ['x','y','z','vx','vy','vz','ax','ay','az']
-            if use_delta_yaw:
+            if self.use_delta_yaw:
                 features.append('delta_yaw')
         self.features = features
 
@@ -112,6 +112,8 @@ class ArgoverseNeighborDataset(Dataset):
                 'context':     torch.from_numpy(s['context']),
                 'intent':      torch.from_numpy(s['intent']),
                 'future_pos':  torch.from_numpy(s['future_pos']),
+                'track_uuid':  s['track_uuid'],
+                'timestamp':   s['timestamp'],
             }
 
         # 13) diagnostic
@@ -178,29 +180,36 @@ class ArgoverseNeighborDataset(Dataset):
                 hist_others = []; mask_others = []
                 for t in hist_times:
                     ids_t, feats_t, _ = self.social_data[t]
-                    dists_all = np.linalg.norm(feats_t[:, :2], axis=1)
-                    if self.neighbor_radius is not None:
-                        # keep all within radius
-                        pick = np.where(dists_all <= self.neighbor_radius)[0]
-                    else:
-                        # fallback to top-K nearest
-                        pick = np.argsort(dists_all)[:self.max_neighbors]
+                dists_all = np.linalg.norm(feats_t[:, :2], axis=1)
 
-                    # enforce an upper‐bound of max_neighbors
-                    if len(pick) > self.max_neighbors:
-                        pick = pick[:self.max_neighbors]
-                    self._neighbor_counts.append(len(pick))
-                    sel = feats_t[pick]
-                    sel = (sel - self.feat_mean) / self.feat_std
-                    c = sel.shape[0]
-                    if c < self.max_neighbors:
-                        pad     = np.zeros((self.max_neighbors-c, F), dtype=sel.dtype)
-                        sel     = np.vstack([sel, pad])
-                        mask_k  = [1]*c + [0]*(self.max_neighbors-c)
+                if self.neighbor_radius is not None:
+                    # Select neighbors within radius only
+                    pick = np.where(dists_all <= self.neighbor_radius)[0]
+                else:
+                    # Fallback: consider all neighbors
+                    pick = np.arange(len(feats_t))
+
+                # Count neighbors for diagnostics
+                self._neighbor_counts.append(len(pick))
+
+                sel = feats_t[pick]
+
+                c = sel.shape[0]
+                if c < self.max_neighbors:
+                    # Pad with zeros if fewer neighbors than max_neighbors
+                    pad = np.zeros((self.max_neighbors - c, F), dtype=sel.dtype)
+                    sel = np.vstack([sel, pad])
+                    mask_k = [1] * c + [0] * (self.max_neighbors - c)
+                else:
+                    # Optional: truncate if more than max_neighbors neighbors (depends on model input requirements)
+                    if c > self.max_neighbors:
+                        sel = sel[:self.max_neighbors]
+                        mask_k = [1] * self.max_neighbors
                     else:
-                        mask_k  = [1]*self.max_neighbors
-                    hist_others.append(sel)
-                    mask_others.append(mask_k)
+                        mask_k = [1] * c
+
+                hist_others.append(sel)
+                mask_others.append(mask_k)
                 hist_others = np.stack(hist_others)
                 mask_others = np.array(mask_others, dtype=np.float32)
 
@@ -262,6 +271,8 @@ class ArgoverseNeighborDataset(Dataset):
                     'context':     ctx_feat.astype(np.float32),
                     'intent':      intent,
                     'future_pos':  future_pos.astype(np.float32),
+                    'track_uuid':  tid,
+                    'timestamp':   target_time
                 })
 
         return samples
@@ -279,4 +290,7 @@ class ArgoverseNeighborDataset(Dataset):
             s['context'],
             s['intent'],
             s['future_pos'],
+            s['track_uuid'],
+            s['timestamp']
+
         )

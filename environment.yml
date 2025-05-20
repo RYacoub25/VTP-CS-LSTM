@@ -1,0 +1,18 @@
+name: av2-py39
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pytorch=2.0.1
+  - torchvision=0.15.2
+  - torchaudio=2.0.2
+  - cudatoolkit=11.7  # remove or change if no GPU or different CUDA version
+  - numpy
+  - pandas
+  - matplotlib
+  - tqdm
+  - pip
+  - pip:
+      - some-other-pip-package-if-any
