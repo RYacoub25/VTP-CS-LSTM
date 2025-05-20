@@ -165,12 +165,7 @@ conda activate av2-py39
 
 <p><em>Lin, L., Li, W., Bi, H., &amp; Qin, L. (2021). Vehicle Trajectory Prediction Using LSTMs With Spatial–Temporal Attention Mechanisms. <strong>IEEE Intelligent Transportation Systems Magazine</strong>, 13(1), 111-124. <a href="https://doi.org/10.1109/MITS.2021.3049404" target="_blank">https://doi.org/10.1109/MITS.2021.3049404</a></em></p>
 
-<hr />
 
-<h2>License</h2>
-<p>This project is licensed under the MIT License - see the <a href="LICENSE">LICENSE</a> file for details.</p>
-
-<hr />
 
 <h2>Contact</h2>
 <p>For questions or issues, please open an issue on GitHub or contact the author.</p>
