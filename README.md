@@ -1,102 +1,179 @@
-Vehicle Trajectory Prediction with Contextual Social LSTMs (CS-LSTM)
-Overview
-This project implements a Contextual Social LSTM model to predict future trajectories of target vehicles based on ego vehicle data, neighboring vehicles, and contextual lane information using the Argoverse 2 dataset. The model predicts incremental displacements over a sequence to anticipate future vehicle positions and improve autonomous driving decisions.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VTP-CS-LSTM: Contextual Social LSTM for Vehicle Trajectory Prediction</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    max-width: 900px;
+    margin: 40px auto;
+    line-height: 1.6;
+    padding: 0 15px;
+    color: #333;
+  }
+  h1, h2, h3 {
+    color: #222;
+  }
+  pre {
+    background: #f4f4f4;
+    padding: 15px;
+    border-radius: 5px;
+    overflow-x: auto;
+  }
+  code {
+    font-family: Consolas, monospace;
+    font-size: 0.95em;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 15px 0;
+  }
+  table, th, td {
+    border: 1px solid #ccc;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+  }
+  blockquote {
+    border-left: 5px solid #ccc;
+    margin-left: 0;
+    padding-left: 15px;
+    color: #666;
+    font-style: italic;
+  }
+  a {
+    color: #0366d6;
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+</style>
+</head>
+<body>
 
-Features
-Predict trajectories of vehicles near the ego vehicle within a configurable radius.
+<h1>VTP-CS-LSTM: Contextual Social LSTM for Vehicle Trajectory Prediction</h1>
 
-Integrates social interactions via neighboring vehicle history.
+<h2>Overview</h2>
+<p>This repository implements a Contextual Social LSTM (CS-LSTM) model to predict future vehicle trajectories in a mixed traffic environment using the Argoverse 2 dataset. The model uses historical trajectories of a target vehicle and its neighbors, combined with contextual lane and map information, to forecast future positions.</p>
+<ul>
+  <li>Predicts future incremental displacements over a sequence of time steps.</li>
+  <li>Considers neighboring vehicles within a configurable radius to capture social interactions.</li>
+  <li>Integrates lane boundary and map object features to provide contextual awareness.</li>
+  <li>Supports visualization of predicted trajectories alongside ground truth and map elements.</li>
+</ul>
 
-Incorporates contextual lane and map features.
+<hr />
 
-Supports variable prediction length (e.g., 30 timesteps / 3 seconds).
+<h2>Dataset</h2>
+<p>The training, validation, and testing datasets are preprocessed from the Argoverse 2 raw data into:</p>
+<ul>
+  <li><code>ego_vehicle_with_intention.csv</code> — ego vehicle states with intention labels.</li>
+  <li><code>social_vehicles_relative.csv</code> — relative positions and states of neighboring vehicles.</li>
+  <li><code>contextual_features_merged.npy</code> — contextual lane and map features.</li>
+  <li><code>constant_features.csv</code> — lane boundary geometries.</li>
+  <li><code>map_objects.csv</code> — traffic signs and map objects.</li>
+</ul>
 
-Visualization tools for trajectories, lane boundaries, map objects, and vehicle positions.
+<hr />
 
-Getting Started
-Prerequisites
-Python 3.9+
+<h2>Model Architecture</h2>
+<p>The CS-LSTM model consists of:</p>
+<ul>
+  <li>LSTM encoders for ego vehicle, target vehicle, and neighboring vehicles.</li>
+  <li>Spatial-temporal attention mechanisms over neighbor encodings.</li>
+  <li>Integration of contextual lane and map features through fully connected layers.</li>
+  <li>Decoder LSTM that outputs incremental displacements for future trajectory prediction.</li>
+</ul>
 
-Conda for environment management
+<hr />
 
-CUDA (optional, if using GPU acceleration)
+<h2>Installation and Setup</h2>
 
-Setup Environment
-Use the provided environment.yml to set up your conda environment:
+<h3>Prerequisites</h3>
+<ul>
+  <li>Python 3.9+</li>
+  <li>Conda for environment management</li>
+  <li>PyTorch with CUDA support (optional for GPU acceleration)</li>
+</ul>
 
-bash
-Copy
-Edit
-conda env create -f environment.yml
+<h3>Create Environment</h3>
+<pre><code>conda env create -f environment.yml
 conda activate av2-py39
-Dataset Preparation
-Ensure you have the Argoverse 2 dataset downloaded and processed. Place the processed CSV and numpy files in the data/processed/ folder:
+</code></pre>
 
-ego_vehicle_with_intention.csv
+<h3>Data Preparation</h3>
+<p>Ensure the processed dataset files are placed under <code>data/processed/</code> as described above.</p>
 
-social_vehicles_relative.csv
+<hr />
 
-contextual_features_merged.npy
+<h2>Training</h2>
+<p>Run the training script with default or customized parameters:</p>
 
-constant_features.csv (lane boundaries)
+<pre><code>python CS_LSTM/train.py --use_delta_yaw --use_intention --epochs 20 --batch 64
+</code></pre>
 
-map_objects.csv (map objects)
+<p>Example with customized parameters:</p>
 
-Training
-Train the model with default parameters or customize in train.py:
+<pre><code>python CS_LSTM/train.py --seq_len 30 --pred_len 30 --use_delta_yaw --batch 64 --epochs 30
+</code></pre>
 
-bash
-Copy
-Edit
-python CS_LSTM/train.py --use_delta_yaw --use_intention
-You can also specify parameters like:
+<hr />
 
-bash
-Copy
-Edit
-python CS_LSTM/train.py --seq_len 30 --pred_len 30 --batch 64 --epochs 20 --use_delta_yaw
-Visualization
-Visualize predictions and map context using:
+<h2>Visualization</h2>
+<p>Visualize predictions, ego vehicle, target vehicle, neighbors, lane boundaries, and map objects:</p>
 
-bash
-Copy
-Edit
-python visualize/visualize_everything.py
-This script loads the trained model and displays interactive plots with:
+<pre><code>python visualize/visualize_everything.py
+</code></pre>
 
-Ego vehicle (car icon)
+<p>The visualization shows:</p>
+<ul>
+  <li>Ego vehicle as a car icon.</li>
+  <li>Target vehicle as a purple dot with its history, predicted and ground truth trajectories.</li>
+  <li>Neighbor vehicles, lane boundaries, and map objects in context.</li>
+</ul>
 
-Target vehicle (purple dot)
+<hr />
 
-History, ground truth, and predicted trajectories
+<h2>Performance Metrics</h2>
+<p>The model predicts 30 future timesteps (3 seconds at 10Hz) with average displacement errors (ADE) and final displacement errors (FDE) computed on the validation set.</p>
 
-Lane boundaries and map objects
+<hr />
 
-Project Structure
-graphql
-Copy
-Edit
-├── CS_LSTM/
-│   ├── dataset.py         # Dataset loader and pre-processing
-│   ├── model.py           # Contextual Social LSTM model definition
-│   ├── train.py           # Training script
-├── visualize/
-│   ├── visualize_everything.py  # Visualization of predictions & map context
-├── data/
-│   ├── processed/         # Preprocessed CSVs and numpy feature files
-├── environment.yml        # Conda environment configuration
-├── README.md              # This file
-Important Notes
-Ensure consistent use of use_delta_yaw flag during training and visualization to match input feature dimensions.
+<h2>Citation</h2>
+<p>If you use this repository for your research, please cite:</p>
 
-Relative vehicle positions are computed with respect to the ego vehicle for accurate social context.
+<pre><code>@article{lin2021vehicle,
+  title={Vehicle Trajectory Prediction Using LSTMs With Spatial–Temporal Attention Mechanisms},
+  author={Lin, Lei and Li, Weizi and Bi, Huikun and Qin, Lingqiao},
+  journal={IEEE Intelligent Transportation Systems Magazine},
+  volume={13},
+  number={1},
+  pages={111--124},
+  year={2021},
+  publisher={IEEE},
+  doi={10.1109/MITS.2021.3049404},
+  url={https://github.com/leilin-research/VTP}
+}
+</code></pre>
 
-Incremental displacements are predicted and then converted to global positions for visualization.
+<p>Or:</p>
 
-Visualization uses matplotlib and supports lane boundaries, map objects, and vehicle icons.
+<p><em>Lin, L., Li, W., Bi, H., &amp; Qin, L. (2021). Vehicle Trajectory Prediction Using LSTMs With Spatial–Temporal Attention Mechanisms. <strong>IEEE Intelligent Transportation Systems Magazine</strong>, 13(1), 111-124. <a href="https://doi.org/10.1109/MITS.2021.3049404" target="_blank">https://doi.org/10.1109/MITS.2021.3049404</a></em></p>
 
-Citation
-If you use this code or model for research, please cite the relevant papers on Social LSTMs and contextual trajectory prediction.
+<hr />
 
-License
-Specify your license here (e.g., MIT, Apache 2.0).
+<h2>License</h2>
+<p>This project is licensed under the MIT License - see the <a href="LICENSE">LICENSE</a> file for details.</p>
+
+<hr />
+
+<h2>Contact</h2>
+<p>For questions or issues, please open an issue on GitHub or contact the author.</p>
+
+</body>
+</html>
