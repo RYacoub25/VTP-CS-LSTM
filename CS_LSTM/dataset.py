@@ -13,10 +13,10 @@ class ArgoverseNeighborDataset(Dataset):
                  pred_len: int = 1,
                  target_radius: float = None,
                  max_neighbors: int = None,
-                 use_delta_yaw: bool = True,
-                 neighbor_radius: float = 10,
-                 use_context: bool = True,
-                 use_intention: bool = True,
+                 use_delta_yaw: bool = False,
+                 neighbor_radius: float = None,
+                 use_context: bool = False,
+                 use_intention: bool = False,
                  features=None):
         """
         - use_delta_yaw:  if True, append Δyaw into each agent’s feature vector
@@ -26,7 +26,7 @@ class ArgoverseNeighborDataset(Dataset):
         self.seq_len       = seq_len
         self.pred_len      = pred_len
         self.target_radius = target_radius  # in the same units as your positions
-        self.max_neighbors = 10
+        self.max_neighbors = max_neighbors
         self.use_delta_yaw = use_delta_yaw
         self.use_context   = use_context
         self.use_intention = use_intention

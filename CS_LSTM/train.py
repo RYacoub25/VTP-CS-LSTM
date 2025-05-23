@@ -156,6 +156,18 @@ def train(
     opt     = optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
 
+    print("Seq Len: ",seq_len,
+          "Pred Len: ", pred_len,
+          "Max Neighbors: ", max_neighbors,
+          "Target Radius: ", target_radius, 
+          "Batch Size: ", batch_size, 
+          "Hidden Dim: ", hidden_dim, 
+          "Learning Rate: ", lr, 
+          "Epochs: ", epochs, 
+          "Use Delta Yaw: ", use_delta_yaw, 
+          "Use Context: ", use_context, 
+          "Use Intention: ", use_intention)
+
     # 6) Training loop
     best_val = float('inf')
     for ep in range(1, epochs+1):
@@ -198,6 +210,7 @@ def train(
                 })
 
         avg_loss = total_loss / len(train_loader)
+
 
         # 7) Validation (in meters)
         model.eval()
@@ -245,31 +258,165 @@ def train(
     # === at the bottom of your train() function, after saving the model ===
     # assuming you still have: 
     #   model, val_loader, mu_xy, sigma_xy, device
-    print("\n📊 Visualization of a few validation predictions:")
-    visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_examples=5)
+  #  print("\n📊 Visualization of a few validation predictions:")
+  #  visualize_predictions(model, val_loader, mu_xy, sigma_xy, device, num_examples=5)
     print(f"🏆 New best ADE {best_val:.4f} m")
 
     return best_val
 
 def main():
 
+    print("📊 Training Baseline")
     train(
     ego_csv="data/processed/ego_vehicle_with_intention.csv",
     social_csv="data/processed/social_vehicles_relative.csv",
     contextual_npy="data/processed/contextual_features_merged.npy",
     seq_len=30,
     pred_len=30,
-    max_neighbors=None,
-    neighbor_radius=10,
-    target_radius=30.0,
+    max_neighbors=10,
+    neighbor_radius=None,
+    target_radius=None,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=False,
+    use_intention=False,
+    )
+    print("📊 Training Contextual")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=None,
+    target_radius=None,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=True,
+    use_intention=False,
+    )
+
+    print("📊 Training Yaw")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=None,
+    target_radius=None,
     batch_size=64,
     hidden_dim=128,
     lr=0.001,
     epochs=20,
     use_delta_yaw=True,
-    use_context=True,
+    use_context=False,
+    use_intention=False,
+    )
+
+    print("📊 Training Intent")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=None,
+    target_radius=None,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=False,
     use_intention=True,
     )
+    print("Training neighbor radii")
+    print("📊 Training Neighbor Radius 5")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=5,
+    target_radius=None,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=False,
+    use_intention=False,
+    )
+    print("📊 Training Neighbor Radius 7.5")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=7.5,
+    target_radius=None,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=False,
+    use_intention=False,
+    )
+    print("📊 Training Neighbor Radius 10")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=10,
+    target_radius=None,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=False,
+    use_intention=False,
+    )
+    print("Training target radius 30")
+    print("📊 Training Target Radius 30")
+    train(
+    ego_csv="data/processed/ego_vehicle_with_intention.csv",
+    social_csv="data/processed/social_vehicles_relative.csv",
+    contextual_npy="data/processed/contextual_features_merged.npy",
+    seq_len=30,
+    pred_len=30,
+    max_neighbors=10,
+    neighbor_radius=None,
+    target_radius=30,
+    batch_size=64,
+    hidden_dim=128,
+    lr=0.001,
+    epochs=20,
+    use_delta_yaw=False,
+    use_context=False,
+    use_intention=False,
+    )
+    
+
+
     
 if __name__ == "__main__":
     main()
